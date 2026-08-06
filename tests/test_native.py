@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from openai_codex.generated.v2_all import (
     CodexErrorInfo,
     CodexErrorInfoValue,
@@ -163,3 +164,10 @@ def test_capabilities_come_from_reported_model_catalog() -> None:
         ("gpt-example-a", "medium"),
         ("gpt-example-b", "low"),
     )
+
+
+def test_incomplete_catalog_fails_closed_instead_of_guessing_capabilities() -> None:
+    model_list = ModelListResponse(data=[], next_cursor="next-page")
+
+    with pytest.raises(native._IncompleteCatalogError):
+        native._capability_pairs(model_list)

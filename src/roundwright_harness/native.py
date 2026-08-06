@@ -64,6 +64,10 @@ class _FailureKind(Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class _IncompleteCatalogError(RuntimeError):
+    """The stable high-level SDK did not return the complete model catalog."""
+
+
 def _digest(value: object) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
@@ -143,6 +147,8 @@ def _exception_failure_kind(error: BaseException) -> _FailureKind:
 def _capability_pairs(model_list: object) -> tuple[tuple[str, str], ...]:
     """Return factual model/effort pairs from the SDK's validated catalog."""
 
+    if model_list.next_cursor is not None:
+        raise _IncompleteCatalogError
     pairs = {
         (model.model, option.reasoning_effort.value)
         for model in model_list.data

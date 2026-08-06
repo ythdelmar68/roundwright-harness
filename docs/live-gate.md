@@ -30,6 +30,8 @@ validated model catalog.
   happens to contain words such as `unauthorized`, `quota`, or `model`.
 - Unsupported model/effort selections are detected from the factual catalog;
   the harness does not manufacture a model/effort Cartesian product.
+- If the stable high-level SDK returns only a partial catalog, the factory
+  fails closed instead of presenting that page as the complete capability set.
 
 This boundary is intentionally conservative. A new classification requires a
 reviewed stable SDK field and regression coverage before a new exact harness
