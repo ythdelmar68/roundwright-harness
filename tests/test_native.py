@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from openai_codex.generated.v2_all import (
     CodexErrorInfo,
     CodexErrorInfoValue,
     HttpConnectionFailed,
     HttpConnectionFailedCodexErrorInfo,
+    ModelListResponse,
     TurnError,
 )
 
@@ -93,22 +92,36 @@ def test_readiness_response_must_be_exact_and_valid_json() -> None:
 
 
 def test_capabilities_come_from_reported_model_catalog() -> None:
-    model_list = SimpleNamespace(
-        data=[
-            SimpleNamespace(
-                model="gpt-example-a",
-                supported_reasoning_efforts=[
-                    SimpleNamespace(reasoning_effort=SimpleNamespace(value="medium")),
-                    SimpleNamespace(reasoning_effort=SimpleNamespace(value="high")),
-                ],
-            ),
-            SimpleNamespace(
-                model="gpt-example-b",
-                supported_reasoning_efforts=[
-                    SimpleNamespace(reasoning_effort=SimpleNamespace(value="low")),
-                ],
-            ),
-        ]
+    model_list = ModelListResponse.model_validate(
+        {
+            "data": [
+                {
+                    "id": "preset-a",
+                    "model": "gpt-example-a",
+                    "displayName": "Example A",
+                    "description": "",
+                    "defaultReasoningEffort": "medium",
+                    "supportedReasoningEfforts": [
+                        {"reasoningEffort": "medium", "description": ""},
+                        {"reasoningEffort": "high", "description": ""},
+                    ],
+                    "hidden": False,
+                    "isDefault": True,
+                },
+                {
+                    "id": "preset-b",
+                    "model": "gpt-example-b",
+                    "displayName": "Example B",
+                    "description": "",
+                    "defaultReasoningEffort": "low",
+                    "supportedReasoningEfforts": [
+                        {"reasoningEffort": "low", "description": ""},
+                    ],
+                    "hidden": False,
+                    "isDefault": False,
+                },
+            ]
+        }
     )
 
     assert native._capability_pairs(model_list) == (
