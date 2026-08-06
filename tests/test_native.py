@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from openai_codex.generated.v2_all import (
     CodexErrorInfo,
     CodexErrorInfoValue,
     HttpConnectionFailed,
     HttpConnectionFailedCodexErrorInfo,
     ModelListResponse,
+    ReasoningEffort,
+    Turn,
+    TurnCompletedNotification,
     TurnError,
+    TurnStatus,
 )
 
 from roundwright_harness import native
@@ -77,6 +83,34 @@ def test_structured_http_status_is_used_without_provider_message() -> None:
         native._turn_failure_kind(error, account_present=True)
         is native._FailureKind.AUTH_EXPIRED
     )
+
+
+def test_probe_stream_preserves_structured_terminal_failure() -> None:
+    error = _turn_error(CodexErrorInfoValue.unauthorized)
+    completed = TurnCompletedNotification(
+        thread_id="thread-1",
+        turn=Turn(
+            id="turn-1",
+            items=[],
+            status=TurnStatus.failed,
+            error=error,
+        ),
+    )
+
+    def events():
+        yield SimpleNamespace(payload=completed)
+
+    handle = SimpleNamespace(id="turn-1", stream=events)
+    thread = SimpleNamespace(turn=lambda *_args, **_kwargs: handle)
+
+    response, failure = native._run_probe_turn(
+        thread,
+        ReasoningEffort.high,
+        account_present=True,
+    )
+
+    assert response is None
+    assert failure is native._FailureKind.AUTH_EXPIRED
 
 
 def test_readiness_response_must_be_exact_and_valid_json() -> None:
