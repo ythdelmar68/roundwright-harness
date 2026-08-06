@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roundwright-harness"
+version = "0.0.0"
+description = "Phase-neutral qualification harness for Roundwright and Roundlet integration gates"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "openai-codex",
+]
+
+[project.scripts]
+roundwright-harness = "roundwright_harness.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9,<10",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["roundwright_harness*"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
