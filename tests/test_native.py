@@ -126,7 +126,7 @@ def test_readiness_response_must_be_exact_and_valid_json() -> None:
     )
 
 
-def test_capabilities_come_from_reported_model_catalog() -> None:
+def test_capabilities_are_configured_pairs_confirmed_by_reported_catalog() -> None:
     model_list = ModelListResponse.model_validate(
         {
             "data": [
@@ -159,10 +159,30 @@ def test_capabilities_come_from_reported_model_catalog() -> None:
         }
     )
 
-    assert native._capability_pairs(model_list) == (
+    configured_pairs = (
         ("gpt-example-a", "high"),
-        ("gpt-example-a", "medium"),
         ("gpt-example-b", "low"),
+        ("gpt-missing", "high"),
+    )
+
+    assert native._capability_pairs(model_list, configured_pairs) == (
+        ("gpt-example-a", "high"),
+        ("gpt-example-b", "low"),
+    )
+
+
+def test_configured_capabilities_are_deduplicated_across_roles() -> None:
+    worker = SimpleNamespace(model="gpt-worker", reasoning_effort=SimpleNamespace(value="high"))
+    primary = SimpleNamespace(model="gpt-supervisor", reasoning_effort=SimpleNamespace(value="xhigh"))
+    fallback = SimpleNamespace(model="gpt-worker", reasoning_effort=SimpleNamespace(value="high"))
+    configuration = SimpleNamespace(
+        worker=SimpleNamespace(value=worker),
+        supervisor_attempt_profiles=SimpleNamespace(value=(primary, fallback)),
+    )
+
+    assert native._configured_capability_pairs(configuration) == (
+        ("gpt-supervisor", "xhigh"),
+        ("gpt-worker", "high"),
     )
 
 
@@ -170,4 +190,4 @@ def test_incomplete_catalog_fails_closed_instead_of_guessing_capabilities() -> N
     model_list = ModelListResponse(data=[], next_cursor="next-page")
 
     with pytest.raises(native._IncompleteCatalogError):
-        native._capability_pairs(model_list)
+        native._capability_pairs(model_list, (("gpt-example", "high"),))

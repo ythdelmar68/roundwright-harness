@@ -50,6 +50,11 @@ failures are classified only from the SDK's typed status fields. Untyped
 failures remain `UNKNOWN`, and model/effort capabilities come from the SDK's
 validated runtime catalog rather than a hard-coded matrix.
 
+On Windows, the command still runs as the ordinary repository owner, but its
+host sandbox must allow Python to launch `git` and the pinned Codex runtime.
+This is a process-execution boundary, not a request for administrator access or
+global Python installation.
+
 Use `roundwright_harness.native:native_factory` as
 `ROUNDWRIGHT_LIVE_PROVIDER_FACTORY`. See [Live gate](docs/live-gate.md) for the
 exact sequence and stop conditions. If `doctor` passes but the live gate reports
