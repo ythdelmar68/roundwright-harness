@@ -14,6 +14,19 @@
 The current provider-health probe itself is read-only and does not use the
 forward-test repository.
 
+## Windows process boundary
+
+Run the live gate as the same low-privilege Windows user that owns the
+repo-local uv environment and Codex session. Administrator elevation is not
+required and does not replace repo-local dependency isolation.
+
+The host process sandbox must permit Python to start both `git` and the pinned
+Codex runtime. If an agent filesystem sandbox denies those child processes,
+run this one bounded command outside that filesystem sandbox while preserving
+the SDK's `deny_all` approval mode, read-only sandbox, ephemeral thread, and
+owner-safe output boundary. A sandbox-denied child process is an infrastructure
+block, not evidence that authentication is missing.
+
 ## Stable classification boundary
 
 The adapter does not search exception or provider message text. It uses only
@@ -29,7 +42,9 @@ validated model catalog.
 - Missing structured evidence is `UNKNOWN`, even when human-readable text
   happens to contain words such as `unauthorized`, `quota`, or `model`.
 - Unsupported model/effort selections are detected from the factual catalog;
-  the harness does not manufacture a model/effort Cartesian product.
+  the harness does not manufacture a model/effort Cartesian product. Runtime
+  audit evidence contains only configured selections that the complete catalog
+  confirms, never unrelated catalog entries.
 - If the stable high-level SDK returns only a partial catalog, the factory
   fails closed instead of presenting that page as the complete capability set.
 

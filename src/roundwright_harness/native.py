@@ -144,18 +144,38 @@ def _exception_failure_kind(error: BaseException) -> _FailureKind:
     return _FailureKind.UNKNOWN
 
 
-def _capability_pairs(model_list: object) -> tuple[tuple[str, str], ...]:
-    """Return factual model/effort pairs from the SDK's validated catalog."""
+def _configured_capability_pairs(configuration: object) -> tuple[tuple[str, str], ...]:
+    """Return the exact model/effort selections requested by Roundwright."""
+
+    profiles = (
+        configuration.worker.value,
+        *configuration.supervisor_attempt_profiles.value,
+    )
+    return tuple(
+        sorted({(profile.model, profile.reasoning_effort.value) for profile in profiles})
+    )
+
+
+def _capability_pairs(
+    model_list: object,
+    configured_pairs: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    """Return configured pairs that the SDK's validated catalog actually reports.
+
+    The full catalog is used for validation but is not copied into public audit
+    evidence. This prevents unrelated model identifiers from widening the
+    candidate's explicit provider contract.
+    """
 
     if model_list.next_cursor is not None:
         raise _IncompleteCatalogError
-    pairs = {
+    reported_pairs = {
         (model.model, option.reasoning_effort.value)
         for model in model_list.data
         for option in model.supported_reasoning_efforts
         if model.model and option.reasoning_effort.value
     }
-    return tuple(sorted(pairs))
+    return tuple(pair for pair in configured_pairs if pair in reported_pairs)
 
 
 def _readiness_failure(response_text: str | None) -> _FailureKind | None:
@@ -279,18 +299,19 @@ def native_factory():
     from roundwright.provider_recovery import ProviderRole
 
     contract_commit = os.environ["ROUNDWRIGHT_CONTRACT_COMMIT"]
-    sdk_version = version("openai-codex")
-    runtime_version = version("openai-codex-cli-bin")
-    with Codex() as codex:
-        capability_pairs = _capability_pairs(codex.models())
-    capabilities = tuple(CodexCapability(model, effort) for model, effort in capability_pairs)
-    audit = CodexRuntimeAudit(sdk_version, runtime_version, capabilities)
     repository_root = Path.cwd().resolve(strict=True)
     configuration = load_configuration(
         cwd=repository_root,
         environment=os.environ,
         home=repository_root,
     )
+    configured_pairs = _configured_capability_pairs(configuration)
+    sdk_version = version("openai-codex")
+    runtime_version = version("openai-codex-cli-bin")
+    with Codex() as codex:
+        capability_pairs = _capability_pairs(codex.models(), configured_pairs)
+    capabilities = tuple(CodexCapability(model, effort) for model, effort in capability_pairs)
+    audit = CodexRuntimeAudit(sdk_version, runtime_version, capabilities)
     store_identity = _digest(
         {"schema": "roundwright-harness-native-store/v1", "sdk": sdk_version, "runtime": runtime_version}
     )
