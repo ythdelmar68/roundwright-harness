@@ -44,7 +44,11 @@ not start Codex or inspect an authentication cache.
 The live gate is separate and opt-in. It uses the Python Codex SDK's pinned
 runtime, opens an ephemeral read-only thread, denies approvals, and requests a
 fixed structured readiness response. The adapter returns only Roundwright's
-typed outcome; provider text and exceptions are never emitted as evidence.
+typed outcome; provider text and exceptions are never emitted as evidence or
+used to guess a category. Authentication, capacity, transport, and policy
+failures are classified only from the SDK's typed status fields. Untyped
+failures remain `UNKNOWN`, and model/effort capabilities come from the SDK's
+validated runtime catalog rather than a hard-coded matrix.
 
 Use `roundwright_harness.native:native_factory` as
 `ROUNDWRIGHT_LIVE_PROVIDER_FACTORY`. See [Live gate](docs/live-gate.md) for the
