@@ -51,6 +51,10 @@ owner reasoning, and emits only a path-free manifest/evidence/retention receipt.
 uv run --locked roundwright-harness record-shadow `
   --input .\case.json `
   --store .\.harness-output\shadow
+
+uv run --locked roundwright-harness verify-shadow `
+  --store .\.harness-output\shadow `
+  --bundle-digest sha256:<exact-bundle-digest>
 ```
 
 The producer supplies the immutable `ready_at`; the Recorder never substitutes

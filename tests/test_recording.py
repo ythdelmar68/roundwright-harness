@@ -45,6 +45,7 @@ def test_recording_is_content_addressed_idempotent_and_path_free(tmp_path: Path)
     assert all(str(value).find(str(tmp_path)) == -1 for value in receipt.values())
     assert len(list(store.glob("*.bundle.json"))) == 1
     assert len(list(store.glob("*.receipt.json"))) == 1
+    assert recording.verify_recording(store, first.bundle_digest) == first
 
 
 def test_recording_rejects_overwrite_of_tampered_content(tmp_path: Path) -> None:
@@ -55,6 +56,25 @@ def test_recording_rejects_overwrite_of_tampered_content(tmp_path: Path) -> None
 
     with pytest.raises(recording.RecordingError):
         recording.record_document(_case(), store)
+    with pytest.raises(recording.RecordingError):
+        recording.verify_recording(store, receipt.bundle_digest)
+
+
+def test_read_back_rejects_tampered_receipt(tmp_path: Path) -> None:
+    store = tmp_path / "store"
+    receipt = recording.record_document(_case(), store)
+    identity = receipt.bundle_digest.removeprefix("sha256:")
+    (store / f"{identity}.receipt.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(recording.RecordingError):
+        recording.verify_recording(store, receipt.bundle_digest)
+
+
+def test_read_back_rejects_floating_or_missing_identity(tmp_path: Path) -> None:
+    with pytest.raises(recording.RecordingError):
+        recording.verify_recording(tmp_path, "main")
+    with pytest.raises(OSError):
+        recording.verify_recording(tmp_path, "sha256:" + "0" * 64)
 
 
 @pytest.mark.parametrize(

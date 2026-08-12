@@ -53,3 +53,15 @@ Exit `0` emits one sealed receipt. Exit `1` emits one typed, path-free blocked
 status without exception text. No provider, GitHub, Git, forward-test, or
 repository mutation is performed.
 
+Read back the retained bundle before replay or recovery:
+
+```powershell
+uv run --locked roundwright-harness verify-shadow `
+  --store .\.harness-output\shadow `
+  --bundle-digest sha256:<exact-bundle-digest>
+```
+
+Verification recomputes the bundle address, canonical envelope, manifest,
+manifest digest, public receipt, receipt digest, and retention identity. A
+missing, modified, non-canonical, symlinked, or conflicting artifact blocks
+without exposing its path or contents.

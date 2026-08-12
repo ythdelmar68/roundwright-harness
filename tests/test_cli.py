@@ -60,6 +60,22 @@ def test_record_shadow_emits_one_public_safe_receipt(
     assert receipt["profile"] == "roundwright-shadow-profile/provenance-decision/v1"
     assert str(tmp_path) not in output.out
 
+    assert (
+        cli.main(
+            [
+                "verify-shadow",
+                "--store",
+                str(tmp_path / "store"),
+                "--bundle-digest",
+                receipt["bundle_digest"],
+            ]
+        )
+        == 0
+    )
+    verified = capsys.readouterr()
+    assert json.loads(verified.out) == receipt
+    assert str(tmp_path) not in verified.out
+
 
 def test_record_shadow_blocks_without_leaking_error_or_path(
     tmp_path: Path, capsys

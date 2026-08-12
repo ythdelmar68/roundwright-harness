@@ -25,6 +25,7 @@ RETENTION_SCHEMA = "roundwright-harness-retention/v1"
 _PROFILE = re.compile(r"roundwright-shadow-profile/[a-z0-9-]+/v[1-9][0-9]*")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _SHA = re.compile(r"[0-9a-f]{40}")
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\\\/]")
 _POSIX_PRIVATE_PATH = re.compile(r"^/(?:Users|home|private|tmp|var|etc)(?:/|$)")
 
@@ -42,6 +43,10 @@ _FORBIDDEN_KEYS = {
     "github_payload",
     "headers",
     "local_path",
+    "message",
+    "messages",
+    "model_input",
+    "model_output",
     "owner_reasoning",
     "password",
     "prompt",
@@ -60,6 +65,7 @@ _FORBIDDEN_KEYS = {
     "secrets",
     "response",
     "responses",
+    "reasoning",
     "token",
     "tokens",
     "transcript",
@@ -104,17 +110,24 @@ def load_document(path: Path) -> dict[str, Any]:
     """Load one strict JSON object without exposing its path in errors."""
 
     try:
-        with path.open("r", encoding="utf-8") as stream:
-            value = json.load(
-                stream,
-                object_pairs_hook=_object_without_duplicates,
-                parse_constant=_reject_constant,
-            )
+        value = _load_bytes(path.read_bytes())
+    except UnicodeError as error:
+        raise RecordingError("invalid JSON document") from error
+    return value
+
+
+def _load_bytes(value: bytes) -> dict[str, Any]:
+    try:
+        decoded = json.loads(
+            value.decode("utf-8"),
+            object_pairs_hook=_object_without_duplicates,
+            parse_constant=_reject_constant,
+        )
     except (json.JSONDecodeError, UnicodeError) as error:
         raise RecordingError("invalid JSON document") from error
-    if type(value) is not dict:
+    if type(decoded) is not dict:
         raise RecordingError("recording input must be an object")
-    return value
+    return decoded
 
 
 def _unsafe_key(key: str) -> bool:
@@ -224,9 +237,7 @@ def _write_once(path: Path, value: bytes) -> None:
             raise RecordingError("content-addressed recording conflict") from None
 
 
-def record_document(value: Mapping[str, Any], store_root: Path) -> RecordingReceipt:
-    """Seal one validated document without overwriting an existing artifact."""
-
+def _assemble(value: Mapping[str, Any]) -> tuple[bytes, RecordingReceipt]:
     evidence = validate_document(value)
     evidence_digest = _digest(evidence)
     manifest = {
@@ -266,14 +277,53 @@ def record_document(value: Mapping[str, Any], store_root: Path) -> RecordingRece
         bundle_digest=bundle_digest,
         retention_identity=retention_identity,
     )
+    return bundle_bytes, receipt
+
+
+def record_document(value: Mapping[str, Any], store_root: Path) -> RecordingReceipt:
+    """Seal one validated document without overwriting an existing artifact."""
+
+    bundle_bytes, receipt = _assemble(value)
 
     store_root.mkdir(parents=True, exist_ok=True)
     if store_root.is_symlink():
         raise RecordingError("recording store must not be a symlink")
-    identity = bundle_digest.removeprefix("sha256:")
+    identity = receipt.bundle_digest.removeprefix("sha256:")
     _write_once(store_root / f"{identity}.bundle.json", bundle_bytes)
     _write_once(
         store_root / f"{identity}.receipt.json",
         _canonical_bytes(receipt.as_dict()) + b"\n",
     )
+    return receipt
+
+
+def verify_recording(store_root: Path, bundle_digest: str) -> RecordingReceipt:
+    """Read back one sealed recording and verify every retained binding."""
+
+    if type(bundle_digest) is not str or _DIGEST.fullmatch(bundle_digest) is None:
+        raise RecordingError("invalid bundle identity")
+    if store_root.is_symlink():
+        raise RecordingError("recording store must not be a symlink")
+    identity = bundle_digest.removeprefix("sha256:")
+    bundle_path = store_root / f"{identity}.bundle.json"
+    receipt_path = store_root / f"{identity}.receipt.json"
+    if bundle_path.is_symlink() or receipt_path.is_symlink():
+        raise RecordingError("recording target must not be a symlink")
+    bundle_bytes = bundle_path.read_bytes()
+    if _digest_bytes(bundle_bytes) != bundle_digest:
+        raise RecordingError("bundle digest mismatch")
+    bundle = _load_bytes(bundle_bytes)
+    if set(bundle) != {"schema", "manifest", "manifest_digest", "evidence"}:
+        raise RecordingError("invalid sealed bundle")
+    if bundle["schema"] != BUNDLE_SCHEMA or type(bundle["evidence"]) is not dict:
+        raise RecordingError("invalid sealed bundle")
+    expected_bytes, receipt = _assemble(bundle["evidence"])
+    if expected_bytes != bundle_bytes:
+        raise RecordingError("bundle manifest mismatch")
+    receipt_bytes = receipt_path.read_bytes()
+    receipt_value = _load_bytes(receipt_bytes)
+    if receipt_value != receipt.as_dict():
+        raise RecordingError("recording receipt mismatch")
+    if receipt_bytes != _canonical_bytes(receipt_value) + b"\n":
+        raise RecordingError("recording receipt is not canonical")
     return receipt

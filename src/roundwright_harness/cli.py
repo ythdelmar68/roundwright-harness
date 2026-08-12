@@ -14,6 +14,7 @@ from roundwright_harness.recording import (
     RecordingError,
     load_document,
     record_document,
+    verify_recording,
 )
 
 SCHEMA = "roundwright-harness/v1"
@@ -76,6 +77,33 @@ def record_shadow(*, input_path: Path, store_root: Path) -> int:
     return 0
 
 
+def verify_shadow(*, store_root: Path, bundle_digest: str) -> int:
+    """Verify one retained case and emit only its typed receipt."""
+
+    try:
+        receipt = verify_recording(store_root, bundle_digest)
+    except RecordingError:
+        payload = {
+            "schema": STATUS_SCHEMA,
+            "gate": "shadow-recorder-read-back",
+            "status": "blocked",
+            "reason": "invalid-or-conflicting-recording",
+        }
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return 1
+    except OSError:
+        payload = {
+            "schema": STATUS_SCHEMA,
+            "gate": "shadow-recorder-read-back",
+            "status": "blocked",
+            "reason": "recording-unavailable",
+        }
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return 1
+    print(json.dumps(receipt.as_dict(), sort_keys=True, separators=(",", ":")))
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(prog="roundwright-harness")
     subcommands = value.add_subparsers(dest="command", required=True)
@@ -84,6 +112,9 @@ def parser() -> argparse.ArgumentParser:
     recorder = subcommands.add_parser("record-shadow")
     recorder.add_argument("--input", type=Path, required=True)
     recorder.add_argument("--store", type=Path, required=True)
+    verifier = subcommands.add_parser("verify-shadow")
+    verifier.add_argument("--store", type=Path, required=True)
+    verifier.add_argument("--bundle-digest", required=True)
     return value
 
 
@@ -93,4 +124,9 @@ def main(argv: list[str] | None = None) -> int:
         return doctor(require_roundwright=arguments.require_roundwright)
     if arguments.command == "record-shadow":
         return record_shadow(input_path=arguments.input, store_root=arguments.store)
+    if arguments.command == "verify-shadow":
+        return verify_shadow(
+            store_root=arguments.store,
+            bundle_digest=arguments.bundle_digest,
+        )
     raise AssertionError("unreachable")
