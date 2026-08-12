@@ -39,6 +39,26 @@ uv run --locked --with-editable ..\roundwright `
 The `doctor` gate reports only package versions and pass/block state. It does
 not start Codex or inspect an authentication cache.
 
+## Shadow evidence Recorder
+
+The phase-neutral Recorder seals one public-safe `roundwright-shadow-case/v2`
+document into an append-only, content-addressed store. It validates the exact
+schema/profile/case/candidate/capture-time identities, rejects raw payloads,
+provider prose, credentials, private paths, transcripts, hidden reasoning, and
+owner reasoning, and emits only a path-free manifest/evidence/retention receipt.
+
+```powershell
+uv run --locked roundwright-harness record-shadow `
+  --input .\case.json `
+  --store .\.harness-output\shadow
+```
+
+The producer supplies the immutable `ready_at`; the Recorder never substitutes
+the current clock. Roundwright still owns each profile's semantic validation,
+comparison, and gate result. The Recorder is not a scheduler, provider caller,
+daemon, mutation authority, or promotion mechanism. See
+[Shadow Recorder](docs/shadow-recorder.md).
+
 ## Live provider gate
 
 The live gate is separate and opt-in. It uses the Python Codex SDK's pinned

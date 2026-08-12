@@ -6,7 +6,7 @@ phase gates, and promotion decisions.
 
 | Phase | Reuse in this repository | Remains in Roundwright |
 | --- | --- | --- |
-| 3 | Native Codex SDK qualification, exact-candidate preflight, typed read-only evidence | Provider-health contract, Shadow comparator, leaf acceptance and merge gate |
+| 3 | Native Codex SDK qualification, exact-candidate preflight, typed read-only evidence, content-addressed Shadow recording | Provider-health contract, versioned Shadow schemas/profiles/comparator, leaf acceptance and merge gate |
 | 4 | Controlled canary runners, cross-environment matrix, disposable target adapters | Canary authority, dispatch policy, environment acceptance thresholds |
 | 5 | Long-run operational probes, retention/migration fixtures, promotion evidence capture | Scanner/daemon lifecycle, retention semantics, promotion decision |
 | 6 | Release-readiness and installation smoke environments | Versioning, packaging, release approval and publication |
