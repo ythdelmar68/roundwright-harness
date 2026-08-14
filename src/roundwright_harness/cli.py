@@ -9,6 +9,13 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from roundwright_harness.capture import (
+    CAPTURE_STATUS_SCHEMA,
+    CapturePlanError,
+    prepare_capture,
+    record_capture,
+    verify_capture,
+)
 from roundwright_harness.recording import (
     STATUS_SCHEMA,
     RecordingError,
@@ -104,6 +111,48 @@ def verify_shadow(*, store_root: Path, bundle_digest: str) -> int:
     return 0
 
 
+def capture_operation(
+    operation: str,
+    *,
+    plan_path: Path,
+    input_path: Path | None = None,
+    store_root: Path | None = None,
+    bundle_digest: str | None = None,
+) -> int:
+    """Run one plan-bound operation with typed, path-free failure output."""
+
+    try:
+        plan = load_document(plan_path)
+        if operation == "prepare":
+            payload = prepare_capture(plan).as_dict()
+        elif operation == "record" and input_path is not None and store_root is not None:
+            payload = record_capture(plan, load_document(input_path), store_root).as_dict()
+        elif operation == "verify" and store_root is not None and bundle_digest is not None:
+            payload = verify_capture(plan, store_root, bundle_digest).as_dict()
+        else:
+            raise CapturePlanError("capture operation is incomplete")
+    except (CapturePlanError, RecordingError):
+        payload = {
+            "schema": CAPTURE_STATUS_SCHEMA,
+            "gate": f"shadow-capture-{operation}",
+            "status": "blocked",
+            "reason": "invalid-or-conflicting-capture-binding",
+        }
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return 1
+    except OSError:
+        payload = {
+            "schema": CAPTURE_STATUS_SCHEMA,
+            "gate": f"shadow-capture-{operation}",
+            "status": "blocked",
+            "reason": "capture-unavailable",
+        }
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return 1
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(prog="roundwright-harness")
     subcommands = value.add_subparsers(dest="command", required=True)
@@ -115,6 +164,16 @@ def parser() -> argparse.ArgumentParser:
     verifier = subcommands.add_parser("verify-shadow")
     verifier.add_argument("--store", type=Path, required=True)
     verifier.add_argument("--bundle-digest", required=True)
+    prepare_capture_parser = subcommands.add_parser("prepare-capture")
+    prepare_capture_parser.add_argument("--plan", type=Path, required=True)
+    record_capture_parser = subcommands.add_parser("record-capture")
+    record_capture_parser.add_argument("--plan", type=Path, required=True)
+    record_capture_parser.add_argument("--input", type=Path, required=True)
+    record_capture_parser.add_argument("--store", type=Path, required=True)
+    verify_capture_parser = subcommands.add_parser("verify-capture")
+    verify_capture_parser.add_argument("--plan", type=Path, required=True)
+    verify_capture_parser.add_argument("--store", type=Path, required=True)
+    verify_capture_parser.add_argument("--bundle-digest", required=True)
     return value
 
 
@@ -126,6 +185,22 @@ def main(argv: list[str] | None = None) -> int:
         return record_shadow(input_path=arguments.input, store_root=arguments.store)
     if arguments.command == "verify-shadow":
         return verify_shadow(
+            store_root=arguments.store,
+            bundle_digest=arguments.bundle_digest,
+        )
+    if arguments.command == "prepare-capture":
+        return capture_operation("prepare", plan_path=arguments.plan)
+    if arguments.command == "record-capture":
+        return capture_operation(
+            "record",
+            plan_path=arguments.plan,
+            input_path=arguments.input,
+            store_root=arguments.store,
+        )
+    if arguments.command == "verify-capture":
+        return capture_operation(
+            "verify",
+            plan_path=arguments.plan,
             store_root=arguments.store,
             bundle_digest=arguments.bundle_digest,
         )
