@@ -297,8 +297,11 @@ def record_document(value: Mapping[str, Any], store_root: Path) -> RecordingRece
     return receipt
 
 
-def verify_recording(store_root: Path, bundle_digest: str) -> RecordingReceipt:
-    """Read back one sealed recording and verify every retained binding."""
+def load_verified_document(
+    store_root: Path,
+    bundle_digest: str,
+) -> tuple[RecordingReceipt, dict[str, Any]]:
+    """Read back one sealed recording plus its verified canonical evidence."""
 
     if type(bundle_digest) is not str or _DIGEST.fullmatch(bundle_digest) is None:
         raise RecordingError("invalid bundle identity")
@@ -326,4 +329,10 @@ def verify_recording(store_root: Path, bundle_digest: str) -> RecordingReceipt:
         raise RecordingError("recording receipt mismatch")
     if receipt_bytes != _canonical_bytes(receipt_value) + b"\n":
         raise RecordingError("recording receipt is not canonical")
-    return receipt
+    return receipt, bundle["evidence"]
+
+
+def verify_recording(store_root: Path, bundle_digest: str) -> RecordingReceipt:
+    """Read back one sealed recording and verify every retained binding."""
+
+    return load_verified_document(store_root, bundle_digest)[0]

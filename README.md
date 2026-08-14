@@ -63,6 +63,22 @@ comparison, and gate result. The Recorder is not a scheduler, provider caller,
 daemon, mutation authority, or promotion mechanism. See
 [Shadow Recorder](docs/shadow-recorder.md).
 
+For an ephemeral observation, prepare one immutable capture plan before the
+arm-before boundary, then use that same plan for sealing and verification:
+
+```powershell
+uv run --locked roundwright-harness prepare-capture --plan .\plan.json
+uv run --locked roundwright-harness record-capture `
+  --plan .\plan.json --input .\case.json --store .\.harness-output\shadow
+uv run --locked roundwright-harness verify-capture `
+  --plan .\plan.json --store .\.harness-output\shadow `
+  --bundle-digest sha256:<exact-bundle-digest>
+```
+
+The plan digest binds profile, case, candidate, `ready_at`, producer, exporter,
+comparator, Recorder, store, and observation identities. The case must carry
+that exact digest; any movement blocks instead of rewriting the plan.
+
 ## Live provider gate
 
 The live gate is separate and opt-in. It uses the Python Codex SDK's pinned

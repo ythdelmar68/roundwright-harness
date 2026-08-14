@@ -21,6 +21,25 @@ The required top-level identities are:
 Roundwright's selected profile defines the remaining typed fields. The Recorder
 does not compare model prose or infer missing lifecycle events.
 
+## Immutable capture plan
+
+Ephemeral observations use `roundwright-harness-capture-plan/v1`. The plan is
+prepared before the selected profile's arm-before boundary and contains exactly
+the profile, case, candidate, `ready_at`, producer, exporter, comparator,
+Recorder, store, and observation identities. The six component identities are
+public-safe SHA-256 values; the Harness returns one canonical plan digest.
+
+The provider or producer receives only the already-prepared public-safe binding.
+The final case includes `capture_plan_digest`. `record-capture` requires the
+case's profile, case, candidate, capture time, and plan digest to match before
+writing anything. `verify-capture` independently reloads the sealed case and
+recomputes the same plan binding. A changed candidate or any other identity
+requires a new plan and a fresh observation; no stage may patch a prior plan.
+
+This bridge does not invoke a provider or interpret a profile. Repository-owned
+code remains responsible for turning the plan into a typed dispatch and for
+deciding whether the typed result matches.
+
 ## Safety and retention
 
 Input containing credentials, tokens, secrets, raw payloads/logs/provider
@@ -42,6 +61,25 @@ selected gate remains responsible for an exact retained store identity and
 retention policy. Do not commit real recordings to Roundwright or Harness.
 
 ## Invocation
+
+Prepare and consume a plan-bound capture:
+
+```powershell
+uv run --locked roundwright-harness prepare-capture --plan .\plan.json
+
+uv run --locked roundwright-harness record-capture `
+  --plan .\plan.json `
+  --input .\case.json `
+  --store .\.harness-output\shadow
+
+uv run --locked roundwright-harness verify-capture `
+  --plan .\plan.json `
+  --store .\.harness-output\shadow `
+  --bundle-digest sha256:<exact-bundle-digest>
+```
+
+Each command emits one typed, path-free receipt or blocked status. The original
+unbound Recorder commands remain available for compatible retained workflows:
 
 ```powershell
 uv run --locked roundwright-harness record-shadow `
