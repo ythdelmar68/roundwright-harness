@@ -49,6 +49,15 @@ class _CliAdapter:
         return executor.ProfileComparison("pass", _digest("comparison"))
 
 
+class _MalformedCliAdapter(_CliAdapter):
+    def project(
+        self,
+        _binding: executor.ExecutorBinding,
+        _execution: executor.ProfileExecution,
+    ) -> dict[str, object]:
+        return {"schema": "wrong"}
+
+
 def test_doctor_emits_one_public_safe_record(capsys) -> None:
     assert cli.doctor(require_roundwright=False) == 0
     output = capsys.readouterr()
@@ -324,3 +333,64 @@ def test_profile_cli_provider_free_failure_reports_zero_counts(
         "reason": "invalid-or-conflicting-executor-binding",
     }
     assert not (tmp_path / "store").exists()
+
+
+def test_profile_cli_blocks_malformed_projection_without_leaking(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    capture_plan = {
+        "schema": "roundwright-harness-capture-plan/v1",
+        "profile": "roundwright-shadow-profile/executor-contract-synthetic/v1",
+        "ready_at": 9,
+        "case_id": "cli-malformed",
+        "candidate_sha": "a" * 40,
+        "producer_identity": _digest("producer"),
+        "exporter_identity": _digest("exporter"),
+        "comparator_identity": _digest("comparator"),
+        "recorder_identity": _digest("recorder"),
+        "store_identity": _digest("store"),
+        "observation_identity": _digest("observation"),
+    }
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema": executor.EXECUTOR_REQUEST_SCHEMA,
+                "capture_plan": capture_plan,
+            }
+        ),
+        encoding="utf-8",
+    )
+    common = [
+        "run-profile",
+        "--request",
+        str(request_path),
+        "--store",
+        str(tmp_path / "store"),
+        "--adapter-factory",
+        "public.module:factory",
+    ]
+    monkeypatch.setattr(cli, "_load_profile_adapter", lambda *_args: _CliAdapter())
+    assert cli.main([*common, "--mode", "validate"]) == 0
+    ready = json.loads(capsys.readouterr().out)
+    monkeypatch.setattr(cli, "_load_profile_adapter", lambda *_args: _MalformedCliAdapter())
+
+    assert cli.main(
+        [
+            *common,
+            "--mode",
+            "execute",
+            "--expected-readiness-digest",
+            ready["receipt_digest"],
+        ]
+    ) == 1
+    blocked = json.loads(capsys.readouterr().out)
+    assert blocked["state"] == "STALE"
+    assert (blocked["dispatch_count"], blocked["record_count"], blocked["verify_count"]) == (
+        1,
+        0,
+        0,
+    )
+    assert str(tmp_path) not in json.dumps(blocked)

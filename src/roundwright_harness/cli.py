@@ -203,7 +203,15 @@ def profile_operation(
             payload = runner.execute(expected_readiness_digest).as_dict()
         else:
             raise ExecutorError("executor mode arguments are invalid")
-    except (ExecutorError, RecordingError, ImportError, AttributeError, TypeError, OSError):
+    except (
+        ExecutorError,
+        CapturePlanError,
+        RecordingError,
+        ImportError,
+        AttributeError,
+        TypeError,
+        OSError,
+    ):
         payload = {
             "schema": EXECUTOR_STATUS_SCHEMA,
             "gate": "profile-executor",

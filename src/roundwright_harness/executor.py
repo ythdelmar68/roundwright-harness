@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -23,6 +24,7 @@ EXECUTOR_REQUEST_SCHEMA = "roundwright-harness-profile-executor-request/v1"
 EXECUTOR_READINESS_SCHEMA = "roundwright-harness-profile-executor-readiness/v1"
 EXECUTOR_RESULT_SCHEMA = "roundwright-harness-profile-executor-result/v1"
 EXECUTOR_STATUS_SCHEMA = "roundwright-harness-profile-executor-status/v1"
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class ExecutorError(ValueError):
@@ -122,16 +124,8 @@ class ProfileComparison:
     def __post_init__(self) -> None:
         if self.status not in ("pass", "fail"):
             raise ExecutorError("comparison status is invalid")
-        if (
-            type(self.result_identity) is not str
-            or len(self.result_identity) != 71
-            or not self.result_identity.startswith("sha256:")
-        ):
+        if type(self.result_identity) is not str or _DIGEST.fullmatch(self.result_identity) is None:
             raise ExecutorError("comparison identity is invalid")
-        try:
-            int(self.result_identity.removeprefix("sha256:"), 16)
-        except ValueError as error:
-            raise ExecutorError("comparison identity is invalid") from error
 
 
 @runtime_checkable
