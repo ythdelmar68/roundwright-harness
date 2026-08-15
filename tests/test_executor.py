@@ -39,6 +39,23 @@ def request(**plan_updates: object) -> dict[str, object]:
     }
 
 
+def contextual_request(
+    *,
+    execution_context: dict[str, object] | None = None,
+    **plan_updates: object,
+) -> dict[str, object]:
+    return {
+        "schema": executor.EXECUTOR_REQUEST_SCHEMA_V2,
+        "capture_plan": plan(**plan_updates),
+        "execution_context": execution_context
+        or {
+            "schema": "example-product-execution-context/v1",
+            "runtime_policy_identity": digest("runtime-policy"),
+            "task_id": "synthetic-task",
+        },
+    }
+
+
 @dataclass
 class FakeAdapter:
     components: executor.ProfileComponentIdentities = field(
@@ -91,6 +108,55 @@ class FakeAdapter:
         return executor.ProfileComparison("pass", digest("comparison"))
 
 
+@dataclass
+class ContextAdapter(FakeAdapter):
+    context_identity: str = field(default_factory=lambda: digest("execution-context"))
+    private_value: object = field(
+        default_factory=lambda: {
+            "provider_capability": object(),
+            "sensitive-marker": "must-never-be-serialized",
+        }
+    )
+    preparation_calls: list[executor.ExecutionContextPreparation] = field(default_factory=list)
+    observed_contexts: list[tuple[str, int]] = field(default_factory=list)
+
+    def prepare_execution_context(
+        self,
+        preparation: executor.ExecutionContextPreparation,
+    ) -> executor.ProfileExecutionContext:
+        self.preparation_calls.append(preparation)
+        return executor.ProfileExecutionContext(self.context_identity, self.private_value)
+
+    def _observe_context(self, action: str, binding: executor.ExecutorBinding) -> None:
+        assert binding.execution_context is not None
+        assert binding.execution_context.value is self.private_value
+        self.observed_contexts.append((action, id(binding.execution_context)))
+
+    def validate(self, binding: executor.ExecutorBinding) -> None:
+        self._observe_context("validate", binding)
+        super().validate(binding)
+
+    def execute(self, binding: executor.ExecutorBinding) -> executor.ProfileExecution:
+        self._observe_context("execute", binding)
+        return super().execute(binding)
+
+    def project(
+        self,
+        binding: executor.ExecutorBinding,
+        execution: executor.ProfileExecution,
+    ) -> dict[str, object]:
+        self._observe_context("project", binding)
+        return super().project(binding, execution)
+
+    def compare(
+        self,
+        binding: executor.ExecutorBinding,
+        evidence: object,
+    ) -> executor.ProfileComparison:
+        self._observe_context("compare", binding)
+        return super().compare(binding, evidence)
+
+
 def readiness(
     value: dict[str, object],
     adapter: FakeAdapter,
@@ -136,6 +202,116 @@ def test_single_entrypoint_validates_and_executes_one_exact_binding(tmp_path: Pa
     ]
     assert len(list((tmp_path / "store").glob("*.bundle.json"))) == 1
     assert len(list((tmp_path / "store").glob("*.receipt.json"))) == 1
+
+
+def test_v2_binds_one_opaque_context_without_serializing_its_value(tmp_path: Path) -> None:
+    value = contextual_request(
+        execution_context={
+            "schema": "example-product-execution-context/v1",
+            "local_state_reference": "private-local-reference",
+            "task_id": "synthetic-task",
+        }
+    )
+    dry_adapter = ContextAdapter()
+    ready = readiness(value, dry_adapter, tmp_path / "store")
+    ready_payload = ready.as_dict()
+
+    assert ready_payload["schema"] == executor.EXECUTOR_READINESS_SCHEMA_V2
+    assert ready_payload["execution_context_input_digest"].startswith("sha256:")
+    assert ready_payload["execution_context_identity"] == digest("execution-context")
+    assert len(dry_adapter.preparation_calls) == 1
+    assert dry_adapter.observed_contexts[0][0] == "validate"
+
+    live_adapter = ContextAdapter()
+    result = executor.run_profile_executor(
+        "execute",
+        value,
+        live_adapter,
+        tmp_path / "store",
+        expected_readiness_digest=str(ready_payload["receipt_digest"]),
+    )
+
+    assert type(result) is executor.ExecutorResultReceipt
+    result_payload = result.as_dict()
+    assert result_payload["schema"] == executor.EXECUTOR_RESULT_SCHEMA_V2
+    assert result_payload["execution_context_input_digest"] == ready_payload["execution_context_input_digest"]
+    assert result_payload["execution_context_identity"] == ready_payload["execution_context_identity"]
+    assert len(live_adapter.preparation_calls) == 1
+    assert [action for action, _ in live_adapter.observed_contexts] == [
+        "validate",
+        "execute",
+        "project",
+        "compare",
+    ]
+    assert len({identity for _, identity in live_adapter.observed_contexts}) == 1
+    encoded = json.dumps({"ready": ready_payload, "result": result_payload}, sort_keys=True)
+    assert "private-local-reference" not in encoded
+    assert "must-never-be-serialized" not in encoded
+
+
+def test_v2_context_identity_drift_blocks_before_dispatch(tmp_path: Path) -> None:
+    value = contextual_request()
+    ready = readiness(value, ContextAdapter(), tmp_path / "store")
+    moved = ContextAdapter(context_identity=digest("moved-execution-context"))
+
+    with pytest.raises(executor.ExecutorError, match="readiness binding has moved"):
+        executor.run_profile_executor(
+            "execute",
+            value,
+            moved,
+            tmp_path / "store",
+            expected_readiness_digest=str(ready.as_dict()["receipt_digest"]),
+        )
+
+    assert [call[0] for call in moved.calls] == ["validate"]
+    assert moved.observed_contexts[0][0] == "validate"
+    assert not (tmp_path / "store").exists()
+
+
+def test_v2_context_input_drift_blocks_before_dispatch(tmp_path: Path) -> None:
+    ready = readiness(contextual_request(), ContextAdapter(), tmp_path / "store")
+    moved_value = contextual_request(
+        execution_context={
+            "schema": "example-product-execution-context/v1",
+            "runtime_policy_identity": digest("moved-runtime-policy"),
+            "task_id": "synthetic-task",
+        }
+    )
+    moved = ContextAdapter()
+
+    with pytest.raises(executor.ExecutorError, match="readiness binding has moved"):
+        executor.run_profile_executor(
+            "execute",
+            moved_value,
+            moved,
+            tmp_path / "store",
+            expected_readiness_digest=str(ready.as_dict()["receipt_digest"]),
+        )
+
+    assert [call[0] for call in moved.calls] == ["validate"]
+    assert not (tmp_path / "store").exists()
+
+
+def test_v2_requires_a_contextual_adapter_before_validation(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+
+    with pytest.raises(executor.ExecutorError, match="does not support execution context"):
+        executor.ProfileExecutor(
+            contextual_request(),
+            adapter,
+            tmp_path / "store",
+        ).validate_only()
+
+    assert adapter.calls == []
+    assert not (tmp_path / "store").exists()
+
+
+def test_v1_legacy_binding_and_receipt_remain_context_free(tmp_path: Path) -> None:
+    ready = readiness(request(), FakeAdapter(), tmp_path / "store")
+
+    assert ready.as_dict()["schema"] == executor.EXECUTOR_READINESS_SCHEMA
+    assert "execution_context_input_digest" not in ready.as_dict()
+    assert "execution_context_identity" not in ready.as_dict()
 
 
 def test_provider_free_failure_has_zero_actions_and_no_store(tmp_path: Path) -> None:
