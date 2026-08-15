@@ -105,13 +105,17 @@ uv run --locked roundwright-harness run-profile `
 
 The factory receives the exact versioned profile identity and returns the
 public `ProfileAdapter` protocol. It must not require the Harness to inspect
-private attributes or guess constructors. The readiness receipt records zero
-dispatch, record, verify, and mutation counts. Execution consumes that exact
-receipt once; any candidate, case, plan, time, component, projection, storage,
-or receipt drift blocks. Successful execution emits a path-free result bound
-to one dispatch, one append-only record, one read-back verification, and the
-adapter's explicit mutation count. See
-[Profile executor](docs/profile-executor.md).
+private attributes or guess constructors. Profiles whose producer needs
+product runtime state use the v2 request and
+`prepare_execution_context(preparation)`: the adapter materializes one opaque
+in-memory context, while the Harness binds only the descriptor digest and a
+public context identity. The Harness never emits the descriptor or value. The
+readiness receipt records zero dispatch, record, verify, and mutation counts.
+Execution consumes that exact receipt once; any candidate, case, plan, time,
+component, context, projection, storage, or receipt drift blocks. Successful
+execution emits a path-free result bound to one dispatch, one append-only
+record, one read-back verification, and the adapter's explicit mutation count.
+See [Profile executor](docs/profile-executor.md).
 
 ## Live provider gate
 

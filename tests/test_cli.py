@@ -58,6 +58,25 @@ class _MalformedCliAdapter(_CliAdapter):
         return {"schema": "wrong"}
 
 
+class _ContextCliAdapter(_CliAdapter):
+    def prepare_execution_context(
+        self,
+        preparation: executor.ExecutionContextPreparation,
+    ) -> executor.ProfileExecutionContext:
+        return executor.ProfileExecutionContext(
+            _digest(
+                "context:"
+                + preparation.input_digest
+                + ":"
+                + preparation.plan.plan_digest
+            ),
+            {
+                "provider_capability": object(),
+                "sensitive-marker": "must-never-be-serialized",
+            },
+        )
+
+
 def test_doctor_emits_one_public_safe_record(capsys) -> None:
     assert cli.doctor(require_roundwright=False) == 0
     output = capsys.readouterr()
@@ -298,6 +317,70 @@ def test_profile_cli_uses_one_command_for_validate_and_execute(
         1,
     )
     assert str(tmp_path) not in json.dumps(result)
+
+
+def test_profile_cli_v2_binds_context_without_emitting_descriptor_or_value(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    capture_plan = {
+        "schema": "roundwright-harness-capture-plan/v1",
+        "profile": "roundwright-shadow-profile/executor-contract-synthetic/v1",
+        "ready_at": 9,
+        "case_id": "cli-context-one-shot",
+        "candidate_sha": "a" * 40,
+        "producer_identity": _digest("producer"),
+        "exporter_identity": _digest("exporter"),
+        "comparator_identity": _digest("comparator"),
+        "recorder_identity": _digest("recorder"),
+        "store_identity": _digest("store"),
+        "observation_identity": _digest("observation"),
+    }
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema": executor.EXECUTOR_REQUEST_SCHEMA_V2,
+                "capture_plan": capture_plan,
+                "execution_context": {
+                    "schema": "example-product-execution-context/v1",
+                    "local_state_reference": "private-local-reference",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "_load_profile_adapter", lambda *_args: _ContextCliAdapter())
+    common = [
+        "run-profile",
+        "--request",
+        str(request_path),
+        "--store",
+        str(tmp_path / "store"),
+        "--adapter-factory",
+        "public.module:factory",
+    ]
+
+    assert cli.main([*common, "--mode", "validate"]) == 0
+    ready = json.loads(capsys.readouterr().out)
+    assert ready["schema"] == executor.EXECUTOR_READINESS_SCHEMA_V2
+
+    assert cli.main(
+        [
+            *common,
+            "--mode",
+            "execute",
+            "--expected-readiness-digest",
+            ready["receipt_digest"],
+        ]
+    ) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["schema"] == executor.EXECUTOR_RESULT_SCHEMA_V2
+    encoded = json.dumps({"ready": ready, "result": result}, sort_keys=True)
+    assert "private-local-reference" not in encoded
+    assert "must-never-be-serialized" not in encoded
+    assert str(tmp_path) not in encoded
 
 
 def test_profile_cli_provider_free_failure_reports_zero_counts(
