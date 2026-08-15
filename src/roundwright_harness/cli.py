@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import importlib.util
 import json
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Callable
 
 from roundwright_harness.capture import (
     CAPTURE_STATUS_SCHEMA,
@@ -22,6 +24,13 @@ from roundwright_harness.recording import (
     load_document,
     record_document,
     verify_recording,
+)
+from roundwright_harness.executor import (
+    EXECUTOR_STATUS_SCHEMA,
+    ExecutorError,
+    ExecutorRequest,
+    ProfileAdapter,
+    ProfileExecutor,
 )
 
 SCHEMA = "roundwright-harness/v1"
@@ -153,6 +162,65 @@ def capture_operation(
     return 0
 
 
+def _load_profile_adapter(
+    factory_spec: str,
+    request: ExecutorRequest,
+) -> ProfileAdapter:
+    """Load one exact public factory without inspecting adapter internals."""
+
+    if factory_spec.count(":") != 1:
+        raise ExecutorError("adapter factory identity is invalid")
+    module_name, attribute_name = factory_spec.split(":")
+    if not module_name or not attribute_name or attribute_name.startswith("_"):
+        raise ExecutorError("adapter factory identity is invalid")
+    module = importlib.import_module(module_name)
+    factory: Callable[[str], object] = getattr(module, attribute_name)
+    adapter = factory(request.capture_plan["profile"])
+    if not isinstance(adapter, ProfileAdapter):
+        raise ExecutorError("adapter factory result is invalid")
+    return adapter
+
+
+def profile_operation(
+    mode: str,
+    *,
+    request_path: Path,
+    store_root: Path,
+    adapter_factory: str,
+    expected_readiness_digest: str | None,
+) -> int:
+    """Use one command path for provider-free validation and execution."""
+
+    runner: ProfileExecutor | None = None
+    try:
+        request_value = load_document(request_path)
+        request = ExecutorRequest.parse(request_value)
+        adapter = _load_profile_adapter(adapter_factory, request)
+        runner = ProfileExecutor(request_value, adapter, store_root)
+        if mode == "validate" and expected_readiness_digest is None:
+            payload = runner.validate_only().as_dict()
+        elif mode == "execute" and expected_readiness_digest is not None:
+            payload = runner.execute(expected_readiness_digest).as_dict()
+        else:
+            raise ExecutorError("executor mode arguments are invalid")
+    except (ExecutorError, RecordingError, ImportError, AttributeError, TypeError, OSError):
+        payload = {
+            "schema": EXECUTOR_STATUS_SCHEMA,
+            "gate": "profile-executor",
+            "status": "blocked",
+            "state": runner.state.value if runner is not None else "UNPREPARED",
+            "dispatch_count": runner.dispatch_count if runner is not None else 0,
+            "record_count": runner.record_count if runner is not None else 0,
+            "verify_count": runner.verify_count if runner is not None else 0,
+            "mutation_count": runner.mutation_count if runner is not None else 0,
+            "reason": "invalid-or-conflicting-executor-binding",
+        }
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return 1
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     value = argparse.ArgumentParser(prog="roundwright-harness")
     subcommands = value.add_subparsers(dest="command", required=True)
@@ -174,6 +242,12 @@ def parser() -> argparse.ArgumentParser:
     verify_capture_parser.add_argument("--plan", type=Path, required=True)
     verify_capture_parser.add_argument("--store", type=Path, required=True)
     verify_capture_parser.add_argument("--bundle-digest", required=True)
+    profile_parser = subcommands.add_parser("run-profile")
+    profile_parser.add_argument("--mode", choices=("validate", "execute"), required=True)
+    profile_parser.add_argument("--request", type=Path, required=True)
+    profile_parser.add_argument("--store", type=Path, required=True)
+    profile_parser.add_argument("--adapter-factory", required=True)
+    profile_parser.add_argument("--expected-readiness-digest")
     return value
 
 
@@ -203,5 +277,13 @@ def main(argv: list[str] | None = None) -> int:
             plan_path=arguments.plan,
             store_root=arguments.store,
             bundle_digest=arguments.bundle_digest,
+        )
+    if arguments.command == "run-profile":
+        return profile_operation(
+            arguments.mode,
+            request_path=arguments.request,
+            store_root=arguments.store,
+            adapter_factory=arguments.adapter_factory,
+            expected_readiness_digest=arguments.expected_readiness_digest,
         )
     raise AssertionError("unreachable")

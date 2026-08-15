@@ -136,7 +136,12 @@ def prepare_capture(value: Mapping[str, Any]) -> CapturePlanReceipt:
     )
 
 
-def _validate_binding(plan: CapturePlanReceipt, evidence: Mapping[str, Any]) -> dict[str, Any]:
+def validate_capture_evidence(
+    plan: CapturePlanReceipt,
+    evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return canonical evidence only when it matches one prepared plan."""
+
     document = validate_document(evidence)
     if (
         document.get("capture_plan_digest") != plan.plan_digest
@@ -157,7 +162,7 @@ def record_capture(
     """Seal evidence only when it consumes the prepared plan exactly."""
 
     plan = prepare_capture(plan_value)
-    document = _validate_binding(plan, evidence)
+    document = validate_capture_evidence(plan, evidence)
     return BoundCaptureReceipt(plan, record_document(document, store_root))
 
 
@@ -170,5 +175,5 @@ def verify_capture(
 
     plan = prepare_capture(plan_value)
     recording, document = load_verified_document(store_root, bundle_digest)
-    _validate_binding(plan, document)
+    validate_capture_evidence(plan, document)
     return BoundCaptureReceipt(plan, recording)
