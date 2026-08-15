@@ -79,6 +79,40 @@ The plan digest binds profile, case, candidate, `ready_at`, producer, exporter,
 comparator, Recorder, store, and observation identities. The case must carry
 that exact digest; any movement blocks instead of rewriting the plan.
 
+## Profile executor
+
+Repositories that declare an external-validation profile supply one reviewed
+adapter factory to the versioned `run-profile` command. The Harness owns the
+generic `prepare -> validate -> arm -> execute -> project -> compare -> seal ->
+verify` state machine; the adapter owns product semantics. Dry validation and
+execution use the same request schema, parser, plan, component identities, and
+command path:
+
+```powershell
+uv run --locked roundwright-harness run-profile `
+  --mode validate `
+  --request .\request.json `
+  --store D:\retained-evidence `
+  --adapter-factory public_module:profile_adapter_factory
+
+uv run --locked roundwright-harness run-profile `
+  --mode execute `
+  --request .\request.json `
+  --store D:\retained-evidence `
+  --adapter-factory public_module:profile_adapter_factory `
+  --expected-readiness-digest sha256:<exact-readiness-receipt-digest>
+```
+
+The factory receives the exact versioned profile identity and returns the
+public `ProfileAdapter` protocol. It must not require the Harness to inspect
+private attributes or guess constructors. The readiness receipt records zero
+dispatch, record, verify, and mutation counts. Execution consumes that exact
+receipt once; any candidate, case, plan, time, component, projection, storage,
+or receipt drift blocks. Successful execution emits a path-free result bound
+to one dispatch, one append-only record, one read-back verification, and the
+adapter's explicit mutation count. See
+[Profile executor](docs/profile-executor.md).
+
 ## Live provider gate
 
 The live gate is separate and opt-in. It uses the Python Codex SDK's pinned
