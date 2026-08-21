@@ -79,6 +79,31 @@ The plan digest binds profile, case, candidate, `ready_at`, producer, exporter,
 comparator, Recorder, store, and observation identities. The case must carry
 that exact digest; any movement blocks instead of rewriting the plan.
 
+## Lifecycle observation ledger
+
+Ephemeral Worker/Supervisor transitions can be armed and retained through a
+separate, phase-neutral ledger. The repository binds one exact public-safe
+window before event one; each append is hash-chained and read back immediately;
+the final ledger is content-addressed, sealed, and independently verified.
+
+```powershell
+uv run --locked roundwright-harness prepare-lifecycle `
+  --plan .\lifecycle-plan.json --store .\.harness-output\lifecycle
+uv run --locked roundwright-harness append-lifecycle `
+  --plan .\lifecycle-plan.json --event .\event.json `
+  --store .\.harness-output\lifecycle
+uv run --locked roundwright-harness seal-lifecycle `
+  --plan .\lifecycle-plan.json --store .\.harness-output\lifecycle
+uv run --locked roundwright-harness verify-lifecycle `
+  --store .\.harness-output\lifecycle `
+  --ledger-digest sha256:<exact-ledger-digest>
+```
+
+The Harness preserves generic transition facts only. The target repository
+still owns profile projection, semantic comparison, and gate decisions. Missed
+pre-arm events require a fresh window and are never inferred. See
+[Lifecycle observation ledger](docs/lifecycle-ledger.md).
+
 ## Profile executor
 
 Repositories that declare an external-validation profile supply one reviewed

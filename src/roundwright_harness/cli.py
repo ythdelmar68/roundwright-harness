@@ -32,6 +32,14 @@ from roundwright_harness.executor import (
     ProfileAdapter,
     ProfileExecutor,
 )
+from roundwright_harness.lifecycle import (
+    LIFECYCLE_STATUS_SCHEMA,
+    LifecycleLedgerError,
+    append_lifecycle_event,
+    prepare_lifecycle,
+    seal_lifecycle,
+    verify_lifecycle,
+)
 
 SCHEMA = "roundwright-harness/v1"
 
@@ -162,6 +170,57 @@ def capture_operation(
     return 0
 
 
+def lifecycle_operation(
+    operation: str,
+    *,
+    store_root: Path,
+    plan_path: Path | None = None,
+    event_path: Path | None = None,
+    ledger_digest: str | None = None,
+) -> int:
+    """Operate one generic append-only lifecycle window with safe output."""
+
+    try:
+        if operation == "verify" and ledger_digest is not None:
+            payload = verify_lifecycle(store_root, ledger_digest).as_dict()
+        elif plan_path is not None:
+            plan = load_document(plan_path)
+            if operation == "prepare":
+                payload = prepare_lifecycle(plan, store_root).as_dict()
+            elif operation == "append" and event_path is not None:
+                payload = append_lifecycle_event(
+                    plan,
+                    load_document(event_path),
+                    store_root,
+                ).as_dict()
+            elif operation == "seal":
+                payload = seal_lifecycle(plan, store_root).as_dict()
+            else:
+                raise LifecycleLedgerError("lifecycle operation is incomplete")
+        else:
+            raise LifecycleLedgerError("lifecycle operation is incomplete")
+    except (LifecycleLedgerError, RecordingError):
+        payload = {
+            "schema": LIFECYCLE_STATUS_SCHEMA,
+            "gate": f"lifecycle-ledger-{operation}",
+            "status": "blocked",
+            "reason": "invalid-or-conflicting-lifecycle-binding",
+        }
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return 1
+    except OSError:
+        payload = {
+            "schema": LIFECYCLE_STATUS_SCHEMA,
+            "gate": f"lifecycle-ledger-{operation}",
+            "status": "blocked",
+            "reason": "lifecycle-store-unavailable",
+        }
+        print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return 1
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
 def _load_profile_adapter(
     factory_spec: str,
     request: ExecutorRequest,
@@ -250,6 +309,19 @@ def parser() -> argparse.ArgumentParser:
     verify_capture_parser.add_argument("--plan", type=Path, required=True)
     verify_capture_parser.add_argument("--store", type=Path, required=True)
     verify_capture_parser.add_argument("--bundle-digest", required=True)
+    prepare_lifecycle_parser = subcommands.add_parser("prepare-lifecycle")
+    prepare_lifecycle_parser.add_argument("--plan", type=Path, required=True)
+    prepare_lifecycle_parser.add_argument("--store", type=Path, required=True)
+    append_lifecycle_parser = subcommands.add_parser("append-lifecycle")
+    append_lifecycle_parser.add_argument("--plan", type=Path, required=True)
+    append_lifecycle_parser.add_argument("--event", type=Path, required=True)
+    append_lifecycle_parser.add_argument("--store", type=Path, required=True)
+    seal_lifecycle_parser = subcommands.add_parser("seal-lifecycle")
+    seal_lifecycle_parser.add_argument("--plan", type=Path, required=True)
+    seal_lifecycle_parser.add_argument("--store", type=Path, required=True)
+    verify_lifecycle_parser = subcommands.add_parser("verify-lifecycle")
+    verify_lifecycle_parser.add_argument("--store", type=Path, required=True)
+    verify_lifecycle_parser.add_argument("--ledger-digest", required=True)
     profile_parser = subcommands.add_parser("run-profile")
     profile_parser.add_argument("--mode", choices=("validate", "execute"), required=True)
     profile_parser.add_argument("--request", type=Path, required=True)
@@ -285,6 +357,31 @@ def main(argv: list[str] | None = None) -> int:
             plan_path=arguments.plan,
             store_root=arguments.store,
             bundle_digest=arguments.bundle_digest,
+        )
+    if arguments.command == "prepare-lifecycle":
+        return lifecycle_operation(
+            "prepare",
+            plan_path=arguments.plan,
+            store_root=arguments.store,
+        )
+    if arguments.command == "append-lifecycle":
+        return lifecycle_operation(
+            "append",
+            plan_path=arguments.plan,
+            event_path=arguments.event,
+            store_root=arguments.store,
+        )
+    if arguments.command == "seal-lifecycle":
+        return lifecycle_operation(
+            "seal",
+            plan_path=arguments.plan,
+            store_root=arguments.store,
+        )
+    if arguments.command == "verify-lifecycle":
+        return lifecycle_operation(
+            "verify",
+            store_root=arguments.store,
+            ledger_digest=arguments.ledger_digest,
         )
     if arguments.command == "run-profile":
         return profile_operation(

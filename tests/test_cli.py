@@ -7,6 +7,7 @@ from pathlib import Path
 from roundwright_harness import cli
 from roundwright_harness.capture import prepare_capture
 from roundwright_harness import executor
+from roundwright_harness import lifecycle
 
 
 def _digest(value: str) -> str:
@@ -253,6 +254,68 @@ def test_capture_cli_blocks_drift_without_path_or_detail(
         "status": "blocked",
     }
     assert str(tmp_path) not in output
+
+
+def test_lifecycle_cli_arms_appends_seals_and_verifies(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    plan = {
+        "schema": lifecycle.LIFECYCLE_PLAN_SCHEMA,
+        "window_identity": _digest("window"),
+        "repository_identity": _digest("repository"),
+        "candidate_sha": "a" * 40,
+        "ready_at": 9,
+        "producer_identity": _digest("producer"),
+        "store_identity": _digest("store"),
+        "capture_plan_digest": _digest("capture-plan"),
+        "review_epoch": 1,
+        "review_round": 1,
+        "review_mode": "complete",
+    }
+    event = {
+        "schema": lifecycle.LIFECYCLE_EVENT_SCHEMA,
+        "window_identity": plan["window_identity"],
+        "repository_identity": plan["repository_identity"],
+        "candidate_sha": plan["candidate_sha"],
+        "sequence": 0,
+        "occurred_at": 9,
+        "role": "supervisor",
+        "task_identity": _digest("task"),
+        "attempt_identity": _digest("attempt"),
+        "review_epoch": 1,
+        "review_round": 1,
+        "review_mode": "complete",
+        "review_attempt": 1,
+        "transition": "attempt_completed",
+        "disposition": "pass",
+        "accepted_result": False,
+        "successor_candidate_sha": None,
+        "predecessor_event_digest": None,
+        "artifact_references": [],
+    }
+    plan_path = tmp_path / "lifecycle-plan.json"
+    event_path = tmp_path / "lifecycle-event.json"
+    store = tmp_path / "store"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+
+    assert cli.main(["prepare-lifecycle", "--plan", str(plan_path), "--store", str(store)]) == 0
+    armed = json.loads(capsys.readouterr().out)
+    assert armed["status"] == "armed"
+
+    assert cli.main(["append-lifecycle", "--plan", str(plan_path), "--event", str(event_path), "--store", str(store)]) == 0
+    appended = json.loads(capsys.readouterr().out)
+    assert appended["status"] == "appended"
+
+    assert cli.main(["seal-lifecycle", "--plan", str(plan_path), "--store", str(store)]) == 0
+    sealed = json.loads(capsys.readouterr().out)
+    assert sealed["status"] == "sealed"
+
+    assert cli.main(["verify-lifecycle", "--store", str(store), "--ledger-digest", sealed["ledger_digest"]]) == 0
+    verified = json.loads(capsys.readouterr().out)
+    assert verified == sealed
+    assert str(tmp_path) not in json.dumps({"armed": armed, "appended": appended, "sealed": sealed})
 
 
 def test_profile_cli_uses_one_command_for_validate_and_execute(
